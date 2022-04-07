@@ -1,8 +1,13 @@
 import pandas as pd
 import numpy as np
+from pyparsing import col
 import streamlit as st
 import altair as alt
 import plotly.express as px
+
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
+
 import time
 from urllib.request import urlopen
 import json
@@ -17,6 +22,12 @@ st.set_page_config(page_title="Covid Data Redo", page_icon=":bar_chart:",layout=
 covidConfirmedUsaFacts = 'assignment2Data/covid_confirmed_usafacts.csv'
 covidDeathsUsaFacts = 'assignment2Data/covid_deaths_usafacts.csv'
 covidCountyPopulationUsaFacts = 'assignment2Data/covid_county_population_usafacts.csv'
+
+# New Test Data  
+# covidConfirmedUsaFacts = 'testData/covid_confirmed_usafacts.csv'
+# covidDeathsUsaFacts = 'testData/covid_deaths_usafacts.csv'
+# covidCountyPopulationUsaFacts = 'testData/covid_county_population_usafacts.csv'
+
 
 # Population per county
 populationsPerCounty = pd.read_csv(covidCountyPopulationUsaFacts)
@@ -47,6 +58,7 @@ for i in range(len(dailyCasesEachCounty.columns)):
     if reverseCountyColumns[i].weekday() == 5:
         endDate -= i
         break;
+
 
 weekInfo =  pd.period_range(start = dailyCasesEachCounty.columns[startDate], end =  dailyCasesEachCounty.columns[endDate-1], freq = 'W-SAT').map(str)
 weekInfo = pd.Series(weekInfo.str.split('/').str[0])
@@ -104,10 +116,13 @@ dailyDeathsEachCounty.rename(columns={'index':'Date'},inplace=True)
 
 # Calculating Weekly numbers in data
 weeklyUsaDeathsEachCounty = round(dailyDeathsEachCounty.groupby(dailyDeathsEachCounty.index // 7).sum(),2)
-weeklyUsaDeathsEachCounty.set_index(weekInfo,inplace=True)
+weeklyUsaDeathsEachCounty.set_index(weekInfoDeaths,inplace=True)
 
 
 def per100K(data):
+    '''
+        The function takes input of weekly number and calculates weekly number per 100K of populations
+    '''
     populations = populationsPerCounty[['countyFIPS','population']]
     populations = populations.groupby('countyFIPS').sum()
 
@@ -126,6 +141,7 @@ def per100K(data):
     weeklyCasesPerCounty['countyFIPS'] = weeklyCasesPerCounty['countyFIPS'].apply(lambda x: x.zfill(5))
 
     weeklyCasesPerCounty.set_index('countyFIPS',inplace=True)
+    weeklyCasesPerCounty.drop(columns=['population'],inplace=True)
     
     return weeklyCasesPerCounty
 
@@ -138,19 +154,59 @@ def choroplethGraphForWeek(weeklyData, label,colormap):
     mapData = pd.DataFrame({'countyFIPS':weeklyData.index,'Cases':weeklyData})
 
     # plotting chrolopleth
-    fig = (px.choropleth(mapData, geojson=counties, locations='countyFIPS', color='Cases',
+    fig = px.choropleth(mapData, geojson=counties, locations='countyFIPS', color='Cases',
                             color_continuous_scale=colormap,
                             range_color=(mapData.iloc[:,1].min(), mapData.iloc[:,1].max()),
                             scope="usa",
                             labels={'Cases':label}
-                            ))
+                            )
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-    return fig
+    st.plotly_chart(fig,use_container_width=True)
+
+
+def startAnimation():
+    '''
+        The function maps the choropleth map with data of a specific week.
+    '''
+
+    for week in weekInfo:
+        
+        with casesPlotPosition:
+            fig = px.choropleth(weeklyCasesPer100KPopulation, locations=weeklyCasesPer100KPopulation.index, geojson= counties,
+            color= week, color_continuous_scale='sunset', range_color=(0,weeklyCasesPer100KPopulation[week].max()))
+            
+            fig.update_layout( title_text = 'New weekly cases per 100K on {0}'.format(week),geo_scope='usa',)
+            
+            st.plotly_chart(fig,use_container_width=True)
+            
+        
+        with deathPlotPosition:
+            fig1 = px.choropleth(weeklyDeathsPer100KPopulation, locations=weeklyDeathsPer100KPopulation.index, geojson= counties,
+                        color= week, color_continuous_scale='viridis', range_color=(weeklyDeathsPer100KPopulation[week].min(),weeklyDeathsPer100KPopulation[week].max()),)
+            
+            fig1.update_layout( title_text = 'Weekly deaths per 100K on {0}'.format(week), geo_scope='usa',)
+
+            st.plotly_chart(fig1,use_container_width=True)
+        
+        time.sleep(1)
+        
+
+
 
 
 if __name__ == '__main__':
 
-    st.header("Covid-19 Data Visualization (Jan 2020 - Feb 2022)")
+    startDateOfData = pd.to_datetime(weeklyUsaCasesEachCounty.index[0])
+    endDateOfData = pd.to_datetime(weeklyUsaCasesEachCounty.index[-1])
+    startMonth = startDateOfData.month_name()
+    startYear = startDateOfData.year
+    endMonth = endDateOfData.month_name()
+    endYear = endDateOfData.year
+    heading = 'Covid-19 Data Visualization ({0} {1} - {2} {3})'.format(startMonth,startYear,endMonth,endYear)
+    st.header(heading)
+    
+
+    st.subheader('Problem 1')
     # Produce a line plot of the weekly new cases of Covid-19 in the USA from the start of the pandemic.
     st.write("Weekly New Cases")
 
@@ -165,6 +221,8 @@ if __name__ == '__main__':
         alt.Tooltip("Total Cases", title="Total Cases"),])
     st.altair_chart(chartCases, use_container_width=True)  
 
+
+    st.subheader('Problem 2')
     # Produce a line plot of the weekly deaths due to Covid-19 in the USA from the start of the pandemic
     st.write("Weekly Deaths")
 
@@ -180,19 +238,32 @@ if __name__ == '__main__':
     st.altair_chart(chartDeaths, use_container_width=True)
 
 
-    weekNumber = st.slider('Select a week number?', 0, 106, 0)
+    st.subheader('Problem 3,4, and 5')
+
+    weekNumber = st.slider('Select a week number?', 0, len(weekInfo), 0)
     st.write("Week Number: ",weekNumber)
     st.write("Week Start Date: ",weekInfo.iloc[weekNumber])
     
+    weeklyCasesPer100KPopulation = per100K(weeklyUsaCasesEachCounty)
+    weeklyDeathsPer100KPopulation = per100K(weeklyUsaDeathsEachCounty)
+
+
     #  Using Plotly Choropleth map produce a map of the USA displaying for each county the new
     #    cases of covid per 100,000 people in a week
-    st.write("New cases per 100K")
-    weekData = per100K(weeklyUsaCasesEachCounty).iloc[:,weekNumber]
-    st.plotly_chart(choroplethGraphForWeek(weekData,'New Cases per 100K',"sunset"),use_container_width=True)
+    st.write("New weekly cases per 100K")
+    choroplethGraphForWeek(weeklyCasesPer100KPopulation.iloc[:,weekNumber],'New Weekly Cases per 100K',"sunset")
     
     # Using Plotly Choropleth map produce a map of the USA displaying for each county the
     #    covid deaths per 100,000 people in a week.
-    st.write("Deaths per 100K")
-    weekDataDeaths=  per100K(weeklyUsaDeathsEachCounty).iloc[:,weekNumber]
-    st.plotly_chart(choroplethGraphForWeek(weekDataDeaths,'Deaths per 100K',"portland"),use_container_width=True)
+    st.write("Weekly Deaths per 100K")
+    choroplethGraphForWeek(weeklyDeathsPer100KPopulation.iloc[:,weekNumber],'Weekly Deaths per 100K',"viridis")
+
+    st.subheader('Problem 6')
+
+    button = st.empty()
+    casesPlotPosition = st.empty()
+    deathPlotPosition = st.empty()
+
+    with button:
+        st.button(label='Start Video', on_click= startAnimation)
 
